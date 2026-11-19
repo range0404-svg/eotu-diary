@@ -251,6 +251,40 @@ export function saveSettings() {
   queuePush(SETTINGS_ID);
 }
 
+// ---------- 외부 파일 동기화 (구글 드라이브) ----------
+/** 동기화 파일에 올릴 전체 데이터 (삭제 기록 포함 → 다른 기기에도 삭제 반영) */
+export function syncSnapshot() {
+  return { app: 'eotu-library', v: DATA_VERSION, savedAt: Date.now(), diaries: state.diaries, settings: state.settings };
+}
+/**
+ * 동기화 파일 내용을 일기별로 병합 (updatedAt 최신 우선, 어느 쪽도 통째로 덮어쓰지 않음)
+ * @returns {{changed:boolean, localNewer:boolean}} changed: 로컬이 바뀜 / localNewer: 파일에 올릴 게 있음
+ */
+export function mergeExternal(obj) {
+  const data = migrate({ ...obj });
+  const remote = new Map();
+  let changed = false;
+  for (const raw of data.diaries || []) {
+    const inc = normalizeDiary(raw);
+    remote.set(inc.id, inc);
+    if (hasPending(inc.id)) continue; // 이 기기에서 입력 중이면 로컬 우선
+    const i = state.diaries.findIndex((d) => d.id === inc.id);
+    if (i < 0) { state.diaries.push(inc); changed = true; }
+    else if (inc.updatedAt > state.diaries[i].updatedAt) { state.diaries[i] = inc; baseline.set(inc.id, clone(inc)); changed = true; }
+  }
+  let localNewer = state.diaries.some((d) => { const r = remote.get(d.id); return !r || d.updatedAt > r.updatedAt; });
+  const rs = data.settings;
+  if (rs && Number(rs.updatedAt || 0) > (state.settings.updatedAt || 0)) {
+    state.settings = normalizeSettings(rs);
+    changed = true;
+    emit('remote-settings');
+  } else if (state.settings.updatedAt && (!rs || state.settings.updatedAt > Number(rs.updatedAt || 0))) {
+    localNewer = true;
+  }
+  if (changed) { persistLocal(); emit('remote'); }
+  return { changed, localNewer };
+}
+
 // ---------- JSON 백업 / 복구 ----------
 export function exportJSON() {
   return JSON.stringify({

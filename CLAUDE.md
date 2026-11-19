@@ -3,7 +3,9 @@
 사용자가 이 앱을 실제 일기장으로 쓰면서 기능을 조금씩 업데이트합니다. **어떤 업데이트에서도 저장된 일기가 사라지면 안 됩니다.**
 
 ## 데이터 보존 (절대 규칙)
-- localStorage 키 `eotu.v2.data`, `eotu.v2.cloud`, `eotu.v2.auth`, `eotu.v2.backup.*` 이름을 바꾸거나 지우지 말 것.
+- localStorage 키 `eotu.v2.data`, `eotu.v2.cloud`, `eotu.v2.auth`, `eotu.v2.backup.*`, `eotu.v2.gdrive` 이름을 바꾸거나 지우지 말 것.
+- 구글 드라이브 동기화 파일 이름 `어투의서재-동기화.json`(js/gdrive.js `FILE_NAME`)을 바꾸지 말 것 — 바꾸면 기존 동기화 파일을 못 찾음.
+- 배포 주소: https://range0404-svg.github.io/eotu-diary/ (GitHub 저장소 range0404-svg/eotu-diary, main 브랜치 루트). 사용자는 Git 없이 웹에서 파일을 끌어다 올림 → 업데이트 후 바뀐 파일 목록을 알려 줄 것.
 - 일기/설정 구조를 바꿀 때는 `js/storage.js`의 `DATA_VERSION`을 올리고 `migrate()`에 이전 → 새 구조 변환을 추가. 기존 필드는 삭제하지 말고 `normalizeDiary()`에 기본값을 둘 것.
 - `localStorage.clear()`나 데이터 초기화 코드를 넣지 말 것.
 - Supabase 테이블 `diary_rows` 구조를 바꾸면 README의 SQL도 함께 갱신.

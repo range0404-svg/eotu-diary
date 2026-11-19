@@ -3,9 +3,10 @@ import * as S from './storage.js';
 import { analyze, toHTML, escapeHTML } from './analyzer.js';
 import * as Q from './search.js';
 import { buildSamples, SAMPLE_PREFIX } from './samples.js';
+import * as GD from './gdrive.js';
 
 // ⚠ 업데이트할 때마다 APP_VERSION과 sw.js의 CACHE를 같은 값으로 올릴 것
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -27,6 +28,7 @@ const ZONE_EL = { foreshadow: $('#zone-foreshadow'), body: $('#zone-body'), foot
 let currentId = null;
 let bodyCaret = { start: 0, end: 0 };
 let mirrorTimer = null;
+let quickTodo = false; // 3초 복선 바: true면 [ ] 할 일로 추가
 let ready = false;
 
 const cur = () => (currentId ? S.getDiary(currentId) : null);
@@ -252,32 +254,121 @@ function handleSlash(ta) {
 
 // ---------- 복선 체크박스 · 본문으로 끌어오기 ----------
 const CHECK_RE = /^(\s*(?:[-*]\s*)?)\[( |x|X)\]\s?/;
+const isDoneLine = (l) => { const m = l.match(CHECK_RE); return !!m && m[2].toLowerCase() === 'x'; };
+const stripBullet = (l) => l.replace(/^\s*[-*]\s*/, '');
 function renderFsLines() {
   const d = cur();
-  if (!d) { el.fsLines.innerHTML = ''; return; }
-  const lines = d.foreshadow.split('\n');
-  el.fsLines.innerHTML = lines.map((line, i) => {
+  if (!d) { el.fsLines.innerHTML = ''; updateFsProgress(0, 0); return; }
+  const dis = d.sealed ? 'disabled' : '';
+  let total = 0, done = 0;
+  el.fsLines.innerHTML = d.foreshadow.split('\n').map((line, i) => {
     if (!line.trim()) return '';
     const m = line.match(CHECK_RE);
-    const done = m && m[2].toLowerCase() === 'x';
-    const text = m ? line.slice(m[0].length) : line.replace(/^\s*[-*]\s*/, '');
-    const box = m ? `<input type="checkbox" data-i="${i}" ${done ? 'checked' : ''} ${d.sealed ? 'disabled' : ''} aria-label="완료 체크">` : '<span>·</span>';
-    return `<li class="${done ? 'done' : ''}">${box}<span class="t">${escapeHTML(text) || '&nbsp;'}</span>
-      <button class="pull" data-i="${i}" title="본문 커서 위치로 끌어오기" ${d.sealed ? 'disabled' : ''}>↓</button></li>`;
+    const isDone = !!m && m[2].toLowerCase() === 'x';
+    if (m) { total++; if (isDone) done++; }
+    const text = m ? line.slice(m[0].length) : stripBullet(line);
+    const lead = m
+      ? `<input type="checkbox" data-i="${i}" ${isDone ? 'checked' : ''} ${dis} aria-label="완료 체크">`
+      : `<button type="button" class="conv" data-conv="${i}" title="체크박스로 바꾸기" ${dis}>☐</button>`;
+    return `<li class="${m ? 'chk' : ''} ${isDone ? 'done' : ''}">${lead}<span class="t" data-i="${i}">${escapeHTML(text) || '&nbsp;'}</span>
+      <button type="button" class="pull" data-i="${i}" title="본문 커서 위치로 끌어오기" ${dis}>↓</button>
+      <button type="button" class="del" data-del="${i}" title="이 줄 삭제" aria-label="이 줄 삭제" ${dis}>×</button></li>`;
   }).join('');
+  updateFsProgress(done, total);
+  $('#fsAdd').disabled = d.sealed;
+  ['#btnFsSortDone', '#btnFsClearDone'].forEach((s) => { $(s).hidden = !done; $(s).disabled = d.sealed; });
 }
-function toggleCheck(i) {
+function updateFsProgress(done, total) {
+  const p = $('#fsProgress');
+  p.hidden = !total;
+  p.textContent = !total ? '' : done === total ? `🎉 ${done}/${total}` : `✓ ${done}/${total}`;
+  p.classList.toggle('all', total > 0 && done === total);
+}
+/** 복선 텍스트를 바꾸고 화면·저장까지 한 번에 */
+function setForeshadow(d, value) {
+  d.foreshadow = value;
+  FIELDS.foreshadow.value = value;
+  autoGrow(FIELDS.foreshadow);
+  touch(d);
+  renderFsLines();
+}
+function editFsLines(fn) {
   const d = cur();
   if (!d || d.sealed) return;
   const lines = d.foreshadow.split('\n');
-  const m = lines[i] && lines[i].match(CHECK_RE);
-  if (!m) return;
-  const next = m[2] === ' ' ? 'x' : ' ';
-  lines[i] = m[1] + `[${next}] ` + lines[i].slice(m[0].length);
-  d.foreshadow = lines.join('\n');
-  FIELDS.foreshadow.value = d.foreshadow;
-  touch(d);
-  renderFsLines();
+  if (fn(lines) === false) return;
+  setForeshadow(d, lines.join('\n'));
+}
+function toggleCheck(i) {
+  editFsLines((lines) => {
+    const m = lines[i] && lines[i].match(CHECK_RE);
+    if (!m) return false;
+    lines[i] = m[1] + `[${m[2] === ' ' ? 'x' : ' '}] ` + lines[i].slice(m[0].length);
+  });
+}
+function convertToCheck(i) {
+  editFsLines((lines) => {
+    if (!lines[i] || CHECK_RE.test(lines[i])) return false;
+    lines[i] = '[ ] ' + stripBullet(lines[i]);
+  });
+}
+function deleteFsLine(i) {
+  editFsLines((lines) => { if (lines[i] === undefined) return false; lines.splice(i, 1); });
+  toast('줄을 지웠습니다 (되돌리기 가능)', 1400);
+}
+function addTodo(text) {
+  text = text.trim();
+  const d = cur();
+  if (!text || !d || d.sealed) return false;
+  const line = CHECK_RE.test(text) ? text : '[ ] ' + text;
+  setForeshadow(d, d.foreshadow.trim() ? d.foreshadow.replace(/\s+$/, '') + '\n' + line : line);
+  return true;
+}
+function sortDoneDown() {
+  editFsLines((lines) => {
+    const keep = lines.filter((l) => !isDoneLine(l));
+    const done = lines.filter(isDoneLine);
+    while (keep.length && !keep[keep.length - 1].trim()) keep.pop();
+    lines.splice(0, lines.length, ...keep, ...done);
+  });
+}
+function clearDone() {
+  const d = cur();
+  if (!d) return;
+  const n = d.foreshadow.split('\n').filter(isDoneLine).length;
+  if (!n || !confirm(`완료한 항목 ${n}개를 복선에서 지울까요?\n(바로 '되돌리기'로 복구할 수 있어요)`)) return;
+  editFsLines((lines) => { const keep = lines.filter((l) => !isDoneLine(l)); lines.splice(0, lines.length, ...keep); });
+  toast(`완료 항목 ${n}개를 지웠습니다`);
+}
+/** Ctrl+Enter: 커서가 있는 줄 체크 토글 (체크박스가 아니면 체크박스로) */
+function toggleLineAtCaret() {
+  const ta = FIELDS.foreshadow;
+  const d = cur();
+  if (!d || d.sealed) return;
+  const pos = ta.selectionStart;
+  const before = ta.value.length;
+  const i = ta.value.slice(0, pos).split('\n').length - 1;
+  editFsLines((lines) => {
+    const m = lines[i].match(CHECK_RE);
+    lines[i] = m ? m[1] + `[${m[2] === ' ' ? 'x' : ' '}] ` + lines[i].slice(m[0].length) : '[ ] ' + stripBullet(lines[i]);
+  });
+  const p = Math.max(0, pos + (ta.value.length - before));
+  ta.setSelectionRange(p, p);
+}
+/** Enter 후: 체크박스/글머리 줄이면 다음 줄에 같은 머리 자동 입력, 빈 항목에서 Enter면 머리 제거 */
+function continueList(ta) {
+  const pos = ta.selectionStart;
+  const v = ta.value;
+  if (pos !== ta.selectionEnd || v[pos - 1] !== '\n') return false;
+  const lineStart = v.lastIndexOf('\n', pos - 2) + 1;
+  const prev = v.slice(lineStart, pos - 1);
+  const m = prev.match(/^(\s*(?:[-*]\s*)?)\[( |x|X)\]\s?(.*)$/);
+  const b = !m && prev.match(/^(\s*[-*]\s+)(.*)$/);
+  if (!m && !b) return false;
+  const rest = m ? m[3] : b[2];
+  if (!rest.trim()) { ta.setRangeText('', lineStart, pos, 'end'); return true; }
+  ta.setRangeText(m ? m[1] + '[ ] ' : b[1], pos, pos, 'end');
+  return true;
 }
 function pullToBody(i) {
   const d = cur();
@@ -512,13 +603,13 @@ function quickAdd(text) {
   if (!d) d = newDiary(today);
   if (d.sealed) { toast('오늘 일기가 봉인되어 있어 추가할 수 없습니다'); return; }
   S.flushSave(d.id);
-  const line = `- [${hhmm()}] ${text}`;
+  const line = quickTodo ? `[ ] ${text}` : `- [${hhmm()}] ${text}`;
   d.foreshadow = d.foreshadow.trim() ? d.foreshadow.replace(/\s+$/, '') + '\n' + line : line;
   S.saveNow(d);
   if (currentId !== d.id) openDiary(d.id);
   else { FIELDS.foreshadow.value = d.foreshadow; autoGrow(FIELDS.foreshadow); renderFsLines(); onSaved(); }
   ZONE_EL.foreshadow.open = true;
-  toast('⚡ 복선에 던졌습니다', 1400);
+  toast(quickTodo ? '☑ 할 일로 던졌습니다' : '⚡ 복선에 던졌습니다', 1400);
 }
 
 let recog = null;
@@ -544,7 +635,7 @@ function toggleMic() {
     if (final) { quickAdd(el.quickInput.value); el.quickInput.value = ''; }
   };
   recog.onerror = (e) => { toast(e.error === 'not-allowed' ? '마이크 권한이 필요합니다' : '음성 인식 오류: ' + e.error); };
-  recog.onend = () => { listening = false; el.mic.classList.remove('listening'); el.quickInput.placeholder = '⚡ 3초 복선 던지기'; };
+  recog.onend = () => { listening = false; el.mic.classList.remove('listening'); el.quickInput.placeholder = quickTodo ? '☑ 할 일로 던지기' : '⚡ 3초 복선 던지기'; };
   try { recog.start(); } catch (err) { toast('음성 인식을 시작할 수 없습니다'); }
 }
 
@@ -650,8 +741,29 @@ async function renderAppInfo() {
   const p = navigator.storage && navigator.storage.persisted ? await navigator.storage.persisted() : null;
   $('#persistStatus').textContent = p === true ? '🛡 영구 저장 보호 중' : p === false ? '저장 보호 대기 (앱 설치 시 자동 보호)' : '';
 }
+function renderGdStatus(msg = '') {
+  const on = GD.isEnabled();
+  const g = GD.getStatus();
+  let text;
+  if (!GD.isConfigured()) text = '아직 설정 전 — js/config.js에 GOOGLE_CLIENT_ID를 넣으면 사용할 수 있어요.';
+  else if (!on) text = '내 구글 드라이브에 "어투의서재-동기화.json" 파일 하나로 PC ↔ 휴대폰 일기를 이어 줍니다. 이 앱이 만든 파일 외에는 접근하지 않아요.';
+  else if (g === 'needauth') text = '구글 로그인이 만료됐어요 (보안상 약 1시간). [다시 연결]을 눌러 주세요 — 일기는 이 기기에 그대로 저장돼 있습니다.';
+  else {
+    const t = GD.lastSync();
+    text = `☁ 연결됨 · 마지막 동기화 ${t ? new Date(t).toLocaleString('ko-KR', { hour12: false }) : '—'}`;
+  }
+  if (msg && g === 'error') text += ` (${msg})`;
+  $('#gdStatus').textContent = text;
+  const btn = $('#btnGdConnect');
+  btn.hidden = !GD.isConfigured() || (on && g !== 'needauth');
+  btn.textContent = on ? '다시 연결' : '구글 드라이브 연결';
+  $('#btnGdSync').hidden = !on || g === 'needauth';
+  $('#btnGdOff').hidden = !on;
+}
 function openSettings() {
   renderAppInfo();
+  renderGdStatus();
+  GD.prepare(); // [연결] 버튼을 누르기 전에 구글 로그인 도구를 미리 불러둠 (팝업 차단 방지)
   $('#habitsText').value = habitsToText(S.state.settings.habits);
   const cfg = S.cloudConfig();
   $('#cloudUrl').value = cfg && cfg.source === 'settings' ? cfg.url : '';
@@ -671,7 +783,17 @@ function renderCloudStatus() {
   $('#btnLogout').hidden = !u;
   $('#btnClearCloud').hidden = !(cfg && cfg.source === 'settings');
 }
+const GD_LABEL = { synced: '드라이브 ✓', syncing: '동기화 중', needauth: '다시 연결', error: '드라이브 오류', offline: '오프라인' };
+const GD_TITLE = { synced: '구글 드라이브와 동기화됨', syncing: '구글 드라이브 동기화 중…', needauth: '구글 로그인이 만료됨 — 눌러서 다시 연결', error: '구글 드라이브 동기화 오류 (이 기기에는 저장됨)', offline: '오프라인 — 연결되면 동기화' };
 function renderSync(status = S.getSyncStatus()) {
+  // 구글 드라이브가 켜져 있고 Supabase를 안 쓰면 뱃지는 드라이브 상태를 표시
+  if (GD.isEnabled() && !S.isCloudReady()) {
+    const g = GD.getStatus();
+    el.sync.className = 'sync-badge ' + ({ synced: 'synced', syncing: 'syncing', offline: 'offline' }[g] || 'error');
+    el.sync.title = (GD_TITLE[g] || '구글 드라이브') + (g === 'needauth' ? '' : ' — 눌러서 지금 동기화');
+    $('#syncLabel').textContent = GD_LABEL[g] || '드라이브';
+    return;
+  }
   const label = { local: '로컬 저장', synced: '클라우드 동기화됨', syncing: '동기화 중…', error: '동기화 오류 (로컬에는 저장됨)', offline: '오프라인 (로컬에 저장 중)' }[status] || status;
   el.sync.className = 'sync-badge ' + status;
   el.sync.title = label + ' — 눌러서 동기화 설정';
@@ -722,6 +844,8 @@ function bind() {
     ta.addEventListener('input', (e) => {
       onFieldInput(zone);
       if (!e.isComposing) handleSlash(ta);
+      const newline = e.inputType === 'insertLineBreak' || e.inputType === 'insertParagraph' || (e.inputType === 'insertText' && e.data === '\n');
+      if (zone === 'foreshadow' && newline && !ta.readOnly && continueList(ta)) onFieldInput(zone);
     });
     ta.addEventListener('compositionend', () => { setTimeout(() => handleSlash(ta), 0); });
   }
@@ -749,8 +873,40 @@ function bind() {
   el.fsLines.addEventListener('click', (e) => {
     const pull = e.target.closest('.pull');
     if (pull) { pullToBody(Number(pull.dataset.i)); return; }
+    const del = e.target.closest('.del');
+    if (del) { deleteFsLine(Number(del.dataset.del)); return; }
+    const conv = e.target.closest('.conv');
+    if (conv) { convertToCheck(Number(conv.dataset.conv)); return; }
     const cb = e.target.closest('input[type="checkbox"]');
-    if (cb) toggleCheck(Number(cb.dataset.i));
+    if (cb) { toggleCheck(Number(cb.dataset.i)); return; }
+    const t = e.target.closest('li.chk .t'); // 글자를 눌러도 체크
+    if (t) toggleCheck(Number(t.dataset.i));
+  });
+  FIELDS.foreshadow.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); toggleLineAtCaret(); }
+  });
+  $('#fsAddForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const inp = $('#fsAdd');
+    if (addTodo(inp.value)) { inp.value = ''; inp.focus(); }
+  });
+  $('#btnFsSortDone').addEventListener('click', sortDoneDown);
+  $('#btnFsClearDone').addEventListener('click', clearDone);
+  // 3초 복선 바: ☐ 켜면 할 일 체크박스로 던짐 (기기별 기억)
+  try { quickTodo = localStorage.getItem('eotu.v2.quickTodo') === '1'; } catch { /* noop */ }
+  const renderQuickTodo = () => {
+    const b = $('#btnQuickTodo');
+    b.classList.toggle('on', quickTodo);
+    b.textContent = quickTodo ? '☑' : '☐';
+    b.setAttribute('aria-pressed', String(quickTodo));
+    el.quickInput.placeholder = quickTodo ? '☑ 할 일로 던지기' : '⚡ 3초 복선 던지기';
+  };
+  renderQuickTodo();
+  $('#btnQuickTodo').addEventListener('click', () => {
+    quickTodo = !quickTodo;
+    try { localStorage.setItem('eotu.v2.quickTodo', quickTodo ? '1' : '0'); } catch { /* noop */ }
+    renderQuickTodo();
+    toast(quickTodo ? '☑ 할 일(체크박스)로 던집니다' : '⚡ 시각 메모로 던집니다', 1400);
   });
 
   // 어투 거울 클릭 → 본문 역추적
@@ -870,7 +1026,34 @@ function bind() {
     renderList(); renderStreak();
     toast(`샘플 일기 ${n}개를 삭제했습니다`);
   });
-  $('#syncBadge').addEventListener('click', openSettings);
+  $('#syncBadge').addEventListener('click', () => {
+    if (GD.isEnabled() && !S.isCloudReady()) {
+      if (GD.getStatus() === 'needauth') { GD.connect(); return; } // 클릭 안에서 바로 팝업
+      S.flushAll(); GD.syncNow(); toast('구글 드라이브와 동기화합니다', 1200); return;
+    }
+    openSettings();
+  });
+  $('#btnGdConnect').addEventListener('click', async () => {
+    S.flushAll();
+    if (await GD.connect()) toast('☁ 구글 드라이브에 연결했습니다');
+  });
+  $('#btnGdSync').addEventListener('click', () => { S.flushAll(); GD.syncNow(); });
+  $('#btnGdOff').addEventListener('click', () => {
+    if (!confirm('구글 드라이브 연결을 해제할까요?\n이 기기와 드라이브의 일기는 둘 다 그대로 남습니다.')) return;
+    GD.disconnect();
+    toast('구글 드라이브 연결을 해제했습니다');
+  });
+  GD.onStatus((s, msg) => {
+    renderSync();
+    if (!$('#settingsModal').hidden) renderGdStatus(msg);
+    if (s === 'error' && msg) console.warn('Drive:', msg);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!GD.isEnabled()) return;
+    if (document.hidden) { S.flushAll(); if (GD.hasToken()) GD.syncNow(); } // 앱을 내릴 때 올림
+    else if (GD.hasToken()) GD.syncNow(); // 다시 열면 받아옴
+    else renderSync();
+  });
 
   // 모바일 키보드: 본문 입력 중엔 3초 복선 바 숨김 + 키보드 높이만큼 바를 위로
   document.addEventListener('focusin', (e) => {
@@ -938,6 +1121,7 @@ function bind() {
 // 저장소 이벤트 (원격 동기화 반영)
 // =====================================================================
 S.onChange((type) => {
+  if (type === 'local') { GD.schedulePush(); return; }
   if (type === 'sync') { renderSync(); return; }
   if (type === 'remote-settings') { applyTheme(); renderMirror(); return; }
   if (type === 'auth') {
@@ -974,6 +1158,8 @@ async function init() {
   const first = today || sortDiaries(S.liveDiaries())[0];
   if (first) openDiary(first.id); else renderMirror();
 
+  // 드라이브에서 먼저 받아와야 다른 기기에서 쓴 '오늘 일기'와 중복되지 않음 (최대 5초 대기)
+  await Promise.race([GD.start(), new Promise((r) => setTimeout(r, 5000))]);
   const res = await S.initCloud();
   ready = true;
   if (res.mode === 'cloud' && !res.user) { showLock(true); return; }

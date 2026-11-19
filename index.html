@@ -90,9 +90,14 @@
         </div>
 
         <details class="zone zone-fs" id="zone-foreshadow" open>
-          <summary><b>복선</b><small>사전 일과 · 업무 메모 · <code>[ ]</code> 체크</small></summary>
-          <textarea id="f-foreshadow" data-zone="foreshadow" rows="3" placeholder="[ ] 오전 회의 자료&#10;[ ] 은행 들르기"></textarea>
+          <summary><b>복선</b><span id="fsProgress" class="fs-progress" hidden></span><small>사전 일과 · 업무 메모 · <code>[ ]</code> 체크</small></summary>
+          <textarea id="f-foreshadow" data-zone="foreshadow" rows="3" placeholder="[ ] 오전 회의 자료&#10;[ ] 은행 들르기&#10;(Enter: 다음 칸 자동 · Ctrl+Enter: 체크)"></textarea>
           <ul id="fsLines" class="fs-lines"></ul>
+          <form id="fsAddForm" class="fs-tools" autocomplete="off">
+            <input id="fsAdd" placeholder="+ 할 일 추가 후 Enter" enterkeyhint="done" />
+            <button type="button" id="btnFsSortDone" class="btn sm" title="완료한 항목을 아래로 모으기" hidden>완료 ↓</button>
+            <button type="button" id="btnFsClearDone" class="btn sm" title="완료한 항목 지우기" hidden>완료 지우기</button>
+          </form>
         </details>
 
         <details class="zone zone-body" id="zone-body" open>
@@ -127,6 +132,7 @@
 
   <!-- 모바일 하단 3초 복선 바 -->
   <form id="quickBar" class="quick-bar" autocomplete="off">
+    <button type="button" id="btnQuickTodo" class="icon-btn todo-toggle" title="할 일(체크박스)로 던지기" aria-pressed="false">☐</button>
     <input id="quickInput" placeholder="⚡ 3초 복선 던지기" enterkeyhint="send" />
     <button type="button" id="btnMic" class="icon-btn mic" title="음성 입력" aria-label="음성 입력">🎤</button>
     <button type="submit" class="btn primary sm">던지기</button>
@@ -207,6 +213,16 @@
         <p class="muted small">한 줄에 하나씩: <code>습관어 = 대체어1, 대체어2, (삭제)</code></p>
         <textarea id="habitsText" rows="6"></textarea>
         <button id="btnSaveHabits" class="btn sm">습관어 저장</button>
+      </section>
+
+      <section class="set-sec">
+        <h4>구글 드라이브 동기화</h4>
+        <p id="gdStatus" class="muted small"></p>
+        <div class="row">
+          <button id="btnGdConnect" class="btn sm primary">구글 드라이브 연결</button>
+          <button id="btnGdSync" class="btn sm" hidden>지금 동기화</button>
+          <button id="btnGdOff" class="btn sm" hidden>연결 해제</button>
+        </div>
       </section>
 
       <section class="set-sec">

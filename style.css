@@ -243,6 +243,24 @@ body.sealed textarea, body.sealed #highlightInput { background: var(--bg-sunk); 
 }
 .fs-lines .pull:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .fs-lines .pull:disabled { opacity: 0.35; }
+.fs-lines li.chk .t { cursor: pointer; }
+.fs-lines input[type="checkbox"] { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); flex: none; cursor: pointer; }
+.fs-lines .conv {
+  border: 1px dashed var(--line); background: none; color: var(--ink-soft);
+  width: 18px; height: 18px; padding: 0; border-radius: 4px; font-size: 11px; line-height: 1; flex: none;
+}
+.fs-lines .conv:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.fs-lines .del { border: 0; background: none; color: var(--ink-soft); opacity: 0.45; font-size: 16px; padding: 0 4px; flex: none; }
+.fs-lines .del:hover:not(:disabled) { opacity: 1; color: var(--seal); }
+.fs-lines .del:disabled { opacity: 0.2; }
+.fs-progress {
+  font-size: 12px; padding: 1px 8px; border-radius: 99px; font-weight: 500;
+  background: var(--bg-sunk); border: 1px solid var(--line); color: var(--ink-soft);
+}
+.fs-progress.all { border-color: #37b24d; color: #2b8a3e; }
+html[data-theme="dark"] .fs-progress.all { color: #69db7c; }
+.fs-tools { display: flex; gap: 6px; padding: 4px 10px 10px; align-items: center; }
+.fs-tools input { flex: 1; min-width: 0; font-size: 14px; padding: 6px 10px; }
 
 /* ---------- 어투 거울 ---------- */
 .mirror-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
@@ -439,6 +457,12 @@ body.blurred #btnBlur { background: var(--accent); color: var(--accent-ink); }
   .save-status { margin-left: auto; }
   .zone textarea { font-size: 16px; padding: 10px 12px; }
   #f-body { min-height: 220px; }
+  .fs-lines li { padding: 8px 6px; gap: 10px; font-size: 14.5px; }
+  .fs-lines input[type="checkbox"], .fs-lines .conv { width: 22px; height: 22px; }
+  .fs-lines .pull { padding: 4px 10px; }
+  .fs-tools input { font-size: 16px; }
+  .quick-bar .todo-toggle { width: 34px; font-size: 18px; }
+  .quick-bar .todo-toggle.on { background: var(--accent); color: var(--accent-ink); border-radius: 50%; }
   .mirror { font-size: 15px; padding: 12px 14px; }
 
   .quick-bar {

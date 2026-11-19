@@ -1,9 +1,9 @@
 // sw.js — 오프라인 캐시 (같은 출처: 네트워크 우선 → 캐시 폴백 / CDN·폰트: 캐시 후 갱신)
 // ⚠ 업데이트할 때마다 js/ui.js의 APP_VERSION과 같은 값으로 올릴 것 (일기 데이터는 캐시와 무관 — 지워지지 않음)
-const CACHE = 'eotu-v2.1.0';
+const CACHE = 'eotu-v2.2.0';
 const SHELL = [
   './', './index.html', './style.css', './manifest.json',
-  './js/ui.js', './js/storage.js', './js/analyzer.js', './js/search.js', './js/config.js', './js/samples.js',
+  './js/ui.js', './js/storage.js', './js/analyzer.js', './js/search.js', './js/config.js', './js/samples.js', './js/gdrive.js',
   './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png',
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];

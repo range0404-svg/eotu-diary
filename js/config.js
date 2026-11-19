@@ -5,3 +5,7 @@
 
 export const SUPABASE_URL = '';
 export const SUPABASE_ANON_KEY = '';
+
+// ▼ 구글 드라이브 동기화: Google Cloud에서 만든 "웹 애플리케이션" OAuth 클라이언트 ID
+//   예: '1234567890-abcdefg.apps.googleusercontent.com'  (공개되어도 괜찮은 값입니다)
+export const GOOGLE_CLIENT_ID = '535265047530-1gd4tusj9fl8rjf6qn0eufrvlblecbgb.apps.googleusercontent.com';
