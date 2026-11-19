@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="ko" data-theme="paper">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="어투의 서재" />
+  <meta name="application-name" content="어투의 서재" />
+  <title>어투의 서재</title>
+  <meta name="description" content="복선 · 본문 · 주석 3구역 일기장과 어투 교정 거울" />
+  <meta name="theme-color" content="#fbfaf7" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&family=Noto+Serif+KR:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 로그인 잠금 화면 (클라우드 설정 시) -->
+  <div id="lockScreen" class="lock" hidden>
+    <form id="lockForm" class="lock-card">
+      <div class="lock-logo">書</div>
+      <h2>어투의 서재</h2>
+      <p class="muted">개인 계정으로 잠겨 있습니다.</p>
+      <input id="lockEmail" type="email" placeholder="이메일" autocomplete="username" required />
+      <input id="lockPw" type="password" placeholder="비밀번호" autocomplete="current-password" required />
+      <div class="row">
+        <button type="submit" class="btn primary">로그인</button>
+        <button type="button" id="lockSignup" class="btn">회원가입</button>
+      </div>
+      <p id="lockMsg" class="lock-msg"></p>
+      <button type="button" id="lockLocal" class="link-btn">클라우드 연결 해제하고 로컬 모드로 사용</button>
+    </form>
+  </div>
+
+  <header class="topbar">
+    <button id="btnMenu" class="icon-btn mobile-only" title="일기 목록" aria-label="일기 목록">☰</button>
+    <h1 class="brand">어투의 서재 <span class="brand-sub">복선 · 본문 · 주석</span></h1>
+    <span id="streak" class="streak" title="연속 기록">🔥 0일</span>
+    <button id="syncBadge" class="sync-badge local" title="로컬 저장"><span class="sync-dot"></span><span id="syncLabel" class="sync-label">로컬</span></button>
+    <div class="top-actions">
+      <button id="btnToday" class="btn sm">오늘</button>
+      <button id="btnSearch" class="icon-btn" title="통합 검색 (Ctrl+K)" aria-label="검색">🔍</button>
+      <button id="btnCalendar" class="icon-btn" title="미니 달력" aria-label="달력">📅</button>
+      <div class="theme-seg desktop-only" role="group" aria-label="테마">
+        <button data-theme-set="paper">종이</button>
+        <button data-theme-set="sepia">세피아</button>
+        <button data-theme-set="dark">심야</button>
+      </div>
+      <button id="btnThemeCycle" class="icon-btn mobile-only" title="테마 전환" aria-label="테마 전환">🎨</button>
+      <button id="btnBlur" class="icon-btn" title="프라이버시 블러 (Esc 2회)" aria-label="블러">👁</button>
+      <button id="btnSettings" class="icon-btn" title="설정" aria-label="설정">⚙</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar">
+      <div class="side-head">
+        <button id="btnNew" class="btn primary block">+ 새 일기</button>
+        <button id="btnInstall" class="btn block install-btn" hidden>📲 앱으로 설치</button>
+      </div>
+      <ul id="diaryList" class="diary-list"></ul>
+    </aside>
+    <div id="scrim" class="scrim"></div>
+
+    <main id="main">
+      <section id="editorPane" class="pane">
+        <div class="entry-head">
+          <input type="date" id="entryDate" aria-label="날짜" />
+          <span id="entryWeekday" class="weekday"></span>
+          <div class="entry-tools">
+            <button id="btnPin" class="tool" title="핀 고정">📌</button>
+            <button id="btnSeal" class="tool">봉인</button>
+            <button id="btnCopy" class="tool">복사</button>
+            <button id="btnUndo" class="tool" disabled>되돌리기</button>
+            <button id="btnDelete" class="tool danger" title="삭제">삭제</button>
+          </div>
+          <span id="saveStatus" class="save-status"></span>
+        </div>
+
+        <div id="sealBanner" class="seal-banner" hidden></div>
+
+        <div class="highlight-row">
+          <span class="hl-star">⭐</span>
+          <input id="highlightInput" placeholder="오늘의 대표 문장 (목록 제목으로 표시)" />
+          <button id="btnPickHighlight" class="btn sm" title="본문에서 선택한 문장 또는 커서가 있는 문장">본문에서 지정</button>
+        </div>
+
+        <details class="zone zone-fs" id="zone-foreshadow" open>
+          <summary><b>복선</b><small>사전 일과 · 업무 메모 · <code>[ ]</code> 체크</small></summary>
+          <textarea id="f-foreshadow" data-zone="foreshadow" rows="3" placeholder="[ ] 오전 회의 자료&#10;[ ] 은행 들르기"></textarea>
+          <ul id="fsLines" class="fs-lines"></ul>
+        </details>
+
+        <details class="zone zone-body" id="zone-body" open>
+          <summary><b>본문</b><small>메인 일기 · /지금 /업무 /할일</small></summary>
+          <textarea id="f-body" data-zone="body" rows="10" placeholder="오늘을 적어 보세요."></textarea>
+        </details>
+
+        <details class="zone zone-fn" id="zone-footnote" open>
+          <summary><b>주석</b><small>사후 기록 · 채증 팩트 체크</small></summary>
+          <textarea id="f-footnote" data-zone="footnote" rows="3" placeholder="※ 확인된 사실, 시각, 증빙 위치"></textarea>
+        </details>
+      </section>
+
+      <section id="mirrorPane" class="pane mirror-pane">
+        <div class="mirror-head">
+          <h2>어투 거울</h2>
+          <label class="switch"><input type="checkbox" id="radarToggle" /> <span>레이더</span></label>
+        </div>
+        <div id="mirrorStats" class="mirror-stats"></div>
+        <div id="endingBars" class="ending-bars"></div>
+        <div id="mirror" class="mirror"></div>
+        <ul class="legend">
+          <li><span class="sw sw-root"></span>어근 반복 3회+</li>
+          <li><span class="sw sw-first"></span>1인칭 주어 3회+</li>
+          <li><span class="sw sw-rep"></span>3연속 같은 종결어미</li>
+          <li><span class="sw sw-long"></span>60자+ 만연체</li>
+          <li><span class="sw sw-habit"></span>습관어 (클릭 → 대체어)</li>
+        </ul>
+      </section>
+    </main>
+  </div>
+
+  <!-- 모바일 하단 3초 복선 바 -->
+  <form id="quickBar" class="quick-bar" autocomplete="off">
+    <input id="quickInput" placeholder="⚡ 3초 복선 던지기" enterkeyhint="send" />
+    <button type="button" id="btnMic" class="icon-btn mic" title="음성 입력" aria-label="음성 입력">🎤</button>
+    <button type="submit" class="btn primary sm">던지기</button>
+  </form>
+
+  <!-- 통합 검색 모달 -->
+  <div id="searchModal" class="modal" hidden>
+    <div class="modal-card wide">
+      <div class="modal-head">
+        <input id="searchInput" type="search" placeholder="검색어 또는 #태그" />
+        <button class="icon-btn" data-close aria-label="닫기">✕</button>
+      </div>
+      <div class="filters">
+        <div class="seg" id="periodSeg">
+          <button data-period="all" class="on">전체</button>
+          <button data-period="7">7일</button>
+          <button data-period="30">30일</button>
+        </div>
+        <div class="seg" id="zoneSeg">
+          <button data-zone="all" class="on">전체</button>
+          <button data-zone="foreshadow">복선</button>
+          <button data-zone="body">본문</button>
+          <button data-zone="footnote">주석</button>
+        </div>
+      </div>
+      <div id="tagChips" class="tag-chips"></div>
+      <div class="tabs">
+        <button data-tab="results" class="on">검색 결과</button>
+        <button data-tab="highlights">⭐ 대표 문장 모음</button>
+      </div>
+      <div id="searchResults" class="results"></div>
+    </div>
+  </div>
+
+  <!-- 미니 달력 모달 -->
+  <div id="calendarModal" class="modal" hidden>
+    <div class="modal-card cal-card">
+      <div class="cal-head">
+        <button id="calPrev" class="icon-btn" aria-label="이전 달">‹</button>
+        <b id="calTitle"></b>
+        <button id="calNext" class="icon-btn" aria-label="다음 달">›</button>
+        <button class="icon-btn" data-close aria-label="닫기">✕</button>
+      </div>
+      <div class="cal-grid cal-week"><span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span></div>
+      <div id="calGrid" class="cal-grid"></div>
+    </div>
+  </div>
+
+  <!-- 설정 모달 -->
+  <div id="settingsModal" class="modal" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <h3>설정</h3>
+        <button class="icon-btn" data-close aria-label="닫기">✕</button>
+      </div>
+
+      <section class="set-sec">
+        <h4>앱 정보</h4>
+        <p class="muted small">버전 <b id="appVersion"></b> · <span id="persistStatus"></span></p>
+        <p class="muted small">업데이트해도 일기는 이 기기에 그대로 남습니다. (같은 주소에서 열 때)</p>
+        <div class="row">
+          <button id="btnInstall2" class="btn sm" hidden>📲 앱으로 설치</button>
+          <button id="btnCheckUpdate" class="btn sm">업데이트 확인</button>
+        </div>
+      </section>
+
+      <section class="set-sec">
+        <h4>테마</h4>
+        <div class="seg" id="themeSeg2">
+          <button data-theme-set="paper">종이</button>
+          <button data-theme-set="sepia">세피아</button>
+          <button data-theme-set="dark">심야 다크</button>
+        </div>
+      </section>
+
+      <section class="set-sec">
+        <h4>습관어 · 대체어</h4>
+        <p class="muted small">한 줄에 하나씩: <code>습관어 = 대체어1, 대체어2, (삭제)</code></p>
+        <textarea id="habitsText" rows="6"></textarea>
+        <button id="btnSaveHabits" class="btn sm">습관어 저장</button>
+      </section>
+
+      <section class="set-sec">
+        <h4>클라우드 동기화 (Supabase)</h4>
+        <p id="cloudStatus" class="muted small"></p>
+        <input id="cloudUrl" placeholder="Project URL (https://xxxx.supabase.co)" />
+        <input id="cloudKey" placeholder="anon public key" />
+        <div class="row">
+          <button id="btnSaveCloud" class="btn sm">연결 저장</button>
+          <button id="btnClearCloud" class="btn sm">연결 해제</button>
+          <button id="btnLogout" class="btn sm" hidden>로그아웃</button>
+        </div>
+      </section>
+
+      <section class="set-sec">
+        <h4>백업 · 복구</h4>
+        <div class="row">
+          <button id="btnExport" class="btn sm">JSON 내보내기</button>
+          <label class="btn sm">JSON 가져오기<input id="importFile" type="file" accept="application/json,.json" hidden /></label>
+          <button id="btnDeleteSamples" class="btn sm">샘플 일기 삭제</button>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <div id="popover" class="popover" hidden></div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script type="module" src="js/ui.js"></script>
+</body>
+</html>
