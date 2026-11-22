@@ -7,7 +7,7 @@ import * as GD from './gdrive.js';
 import { reviewTemplate, isReview, setStars, oneLiner, workTitle } from './templates.js';
 
 // ⚠ 업데이트할 때마다 APP_VERSION과 sw.js의 CACHE를 같은 값으로 올릴 것
-export const APP_VERSION = '2.3.0';
+export const APP_VERSION = '2.3.1';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];

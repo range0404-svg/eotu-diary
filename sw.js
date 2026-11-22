@@ -1,6 +1,6 @@
 // sw.js — 오프라인 캐시 (같은 출처: 네트워크 우선 → 캐시 폴백 / CDN·폰트: 캐시 후 갱신)
 // ⚠ 업데이트할 때마다 js/ui.js의 APP_VERSION과 같은 값으로 올릴 것 (일기 데이터는 캐시와 무관 — 지워지지 않음)
-const CACHE = 'eotu-v2.3.0';
+const CACHE = 'eotu-v2.3.1';
 const SHELL = [
   './', './index.html', './style.css', './manifest.json',
   './js/ui.js', './js/storage.js', './js/analyzer.js', './js/search.js', './js/config.js', './js/samples.js', './js/gdrive.js', './js/templates.js',
@@ -27,7 +27,9 @@ self.addEventListener('fetch', (e) => {
 
   if (url.origin === self.location.origin) {
     e.respondWith(
-      fetch(req)
+      // cache: 'no-cache' → 브라우저 HTTP 캐시(GitHub Pages max-age=600)를 쓰지 않고 서버에 새 버전 확인
+      //  (바뀐 게 없으면 304로 가볍게 끝남) → 업데이트가 10분 지연 없이 바로 반영
+      fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
         .then((res) => {
           if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(req, copy)); }
           return res;
