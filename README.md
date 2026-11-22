@@ -2,6 +2,15 @@
 
 복선 · 본문 · 주석 3구역 일기장 + 어투 교정 거울. 빌드 없음 (HTML / CSS / Vanilla JS ES Modules).
 
+## 업데이트 올리는 법 (GitHub 웹, Git 설치 없이)
+1. 크롬에서 **https://github.com/range0404-svg/eotu-diary** 접속
+2. 로그아웃 상태면 오른쪽 위 **Sign in** → 아이디(range0404-svg)·비밀번호 로그인 → 저장소 화면으로 돌아옴
+   - 바로가기: https://github.com/range0404-svg/eotu-diary/upload/main (로그인 후 업로드 창으로 바로 이동)
+3. 저장소 화면 파일 목록 위 **Add file ▾ → Upload files**
+4. 파일 탐색기에서 이 폴더 **안의** 바뀐 파일·폴더를 골라 "Drag files here" 칸에 끌어다 놓기 (`.claude` 제외, 폴더째 X)
+5. 아래 초록 **Commit changes** 클릭
+6. 1~2분 뒤 https://range0404-svg.github.io/eotu-diary/ 에 반영 (앱: ⚙ 설정 → 업데이트 확인)
+
 ## 실행
 - **로컬:** VS Code에서 `index.html` 우클릭 → *Open with Live Server*
 - **배포:** 폴더를 그대로 Vercel에 올리면 됩니다 (Framework: Other, 빌드 명령 없음).

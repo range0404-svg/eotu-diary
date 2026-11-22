@@ -60,6 +60,7 @@
     <aside id="sidebar">
       <div class="side-head">
         <button id="btnNew" class="btn primary block">+ 새 일기</button>
+        <button id="btnReview" class="btn block" title="작품 감상 후기 템플릿으로 쓰기">📚 작품 후기 쓰기</button>
         <button id="btnInstall" class="btn block install-btn" hidden>📲 앱으로 설치</button>
       </div>
       <ul id="diaryList" class="diary-list"></ul>
@@ -102,6 +103,13 @@
 
         <details class="zone zone-body" id="zone-body" open>
           <summary><b>본문</b><small>메인 일기 · /지금 /업무 /할일</small></summary>
+          <div id="reviewBar" class="review-bar" hidden>
+            <span class="rv-label">📚 작품 후기</span>
+            <span id="rvStars" class="rv-stars" role="group" aria-label="별점">
+              <button type="button" data-star="1" aria-label="별 1개">☆</button><button type="button" data-star="2" aria-label="별 2개">☆</button><button type="button" data-star="3" aria-label="별 3개">☆</button><button type="button" data-star="4" aria-label="별 4개">☆</button><button type="button" data-star="5" aria-label="별 5개">☆</button>
+            </span>
+            <button type="button" id="btnRvHighlight" class="btn sm" title="■ 한 줄 평을 오늘의 대표 문장으로">한 줄 평 → ⭐</button>
+          </div>
           <textarea id="f-body" data-zone="body" rows="10" placeholder="오늘을 적어 보세요."></textarea>
         </details>
 
@@ -116,16 +124,12 @@
           <h2>어투 거울</h2>
           <label class="switch"><input type="checkbox" id="radarToggle" /> <span>레이더</span></label>
         </div>
+        <!-- 7개 항목 ON/OFF 필터 칩 (색 견본 = 거울 하이라이트 스타일, 숫자 = 감지 개수) -->
+        <div id="mirrorFilters" class="mirror-filters" role="group" aria-label="어투 거울 항목 켜기/끄기"></div>
         <div id="mirrorStats" class="mirror-stats"></div>
         <div id="endingBars" class="ending-bars"></div>
         <div id="mirror" class="mirror"></div>
-        <ul class="legend">
-          <li><span class="sw sw-root"></span>어근 반복 3회+</li>
-          <li><span class="sw sw-first"></span>1인칭 주어 3회+</li>
-          <li><span class="sw sw-rep"></span>3연속 같은 종결어미</li>
-          <li><span class="sw sw-long"></span>60자+ 만연체</li>
-          <li><span class="sw sw-habit"></span>습관어 (클릭 → 대체어)</li>
-        </ul>
+        <div id="ignoredLine" class="ignored-line" hidden></div>
       </section>
     </main>
   </div>
@@ -213,6 +217,18 @@
         <p class="muted small">한 줄에 하나씩: <code>습관어 = 대체어1, 대체어2, (삭제)</code></p>
         <textarea id="habitsText" rows="6"></textarea>
         <button id="btnSaveHabits" class="btn sm">습관어 저장</button>
+      </section>
+
+      <section class="set-sec">
+        <h4>어투 거울 예외</h4>
+        <p class="muted small">고유명사 면제 목록 — 어근 반복·근접 메아리에서 빠집니다. (6회 이상은 도배 경고)</p>
+        <div id="properChips" class="word-chips"></div>
+        <form id="properAddForm" class="row" autocomplete="off">
+          <input id="properAdd" placeholder="예: 김철수, 서울숲" />
+          <button type="submit" class="btn sm">추가</button>
+        </form>
+        <p class="muted small">지금 일기에서 ‘이 글에서만 무시’한 단어 — 눌러서 복구</p>
+        <div id="ignoredChips" class="word-chips"></div>
       </section>
 
       <section class="set-sec">

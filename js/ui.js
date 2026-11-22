@@ -4,9 +4,10 @@ import { analyze, toHTML, escapeHTML } from './analyzer.js';
 import * as Q from './search.js';
 import { buildSamples, SAMPLE_PREFIX } from './samples.js';
 import * as GD from './gdrive.js';
+import { reviewTemplate, isReview, setStars, oneLiner, workTitle } from './templates.js';
 
 // ⚠ 업데이트할 때마다 APP_VERSION과 sw.js의 CACHE를 같은 값으로 올릴 것
-export const APP_VERSION = '2.2.0';
+export const APP_VERSION = '2.3.0';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
@@ -21,6 +22,7 @@ const el = {
   fsLines: $('#fsLines'), mirror: $('#mirror'), stats: $('#mirrorStats'), bars: $('#endingBars'),
   radar: $('#radarToggle'), streak: $('#streak'), sync: $('#syncBadge'), popover: $('#popover'), toast: $('#toast'),
   quickBar: $('#quickBar'), quickInput: $('#quickInput'), mic: $('#btnMic'),
+  filters: $('#mirrorFilters'), ignoredLine: $('#ignoredLine'), reviewBar: $('#reviewBar'),
 };
 const FIELDS = { foreshadow: $('#f-foreshadow'), body: $('#f-body'), footnote: $('#f-footnote') };
 const ZONE_EL = { foreshadow: $('#zone-foreshadow'), body: $('#zone-body'), footnote: $('#zone-footnote') };
@@ -131,6 +133,10 @@ function sortDiaries(arr) {
 const firstLine = (s) => (s || '').split('\n').map((l) => l.trim()).find(Boolean) || '';
 function titleOf(d) {
   if (d.highlightSentence.trim()) return { text: d.highlightSentence.trim(), hl: true };
+  if (isReview(d.body) && workTitle(d.body)) {
+    const stars = (d.body.match(/^■\s*별점:\s*(★+)/m) || [, ''])[1];
+    return { text: `📚 ${workTitle(d.body)}${stars ? ' ' + stars : ''}`, hl: false };
+  }
   return { text: firstLine(d.body) || firstLine(d.foreshadow) || firstLine(d.footnote) || '(빈 일기)', hl: false };
 }
 function renderList() {
@@ -185,6 +191,7 @@ function fillEditor() {
   el.status.textContent = '';
   renderMeta();
   renderFsLines();
+  renderReviewBar();
   renderMirror();
 }
 function renderMeta() {
@@ -227,8 +234,44 @@ function onFieldInput(zone) {
     bodyCaret = { start: ta.selectionStart, end: ta.selectionEnd };
     clearTimeout(mirrorTimer);
     mirrorTimer = setTimeout(renderMirror, 180);
+    renderReviewBar();
   }
   if (zone === 'foreshadow') renderFsLines();
+}
+
+// ---------- 작품 후기 템플릿 ----------
+function renderReviewBar() {
+  const d = cur();
+  const on = !!d && isReview(d.body);
+  el.reviewBar.hidden = !on;
+  if (!on) return;
+  const n = (d.body.match(/^■\s*별점:\s*(★*)/m) || [, ''])[1].length;
+  $$('#rvStars button').forEach((b) => {
+    const k = Number(b.dataset.star);
+    b.textContent = k <= n ? '★' : '☆';
+    b.classList.toggle('on', k <= n);
+    b.disabled = d.sealed;
+  });
+  $('#btnRvHighlight').disabled = d.sealed;
+}
+/** 본문이 비어 있으면 지금 일기에, 아니면 오늘 날짜로 새 후기 일기를 만들어 템플릿 삽입 */
+function startReview() {
+  const d = cur();
+  const tpl = reviewTemplate();
+  if (d && !d.sealed && !d.body.trim()) {
+    FIELDS.body.value = tpl;
+    onFieldInput('body');
+  } else {
+    const { diary } = S.createDiary(S.todayStr(), { carry: false, body: tpl });
+    openDiary(diary.id);
+    renderStreak();
+  }
+  ZONE_EL.body.open = true;
+  // 커서를 "■ 작품명: " 뒤로
+  const pos = FIELDS.body.value.indexOf('■ 작품명: ') + '■ 작품명: '.length;
+  requestAnimationFrame(() => selectInField('body', pos, pos));
+  if (isMobile()) document.body.classList.remove('side-open');
+  toast('📚 작품 후기 템플릿 — 별은 위 ☆을 눌러 매겨요');
 }
 
 // ---------- 슬래시 명령어 ----------
@@ -415,14 +458,48 @@ function pickHighlight() {
 // =====================================================================
 // 어투 거울
 // =====================================================================
+// 7개 필터 칩: 키 · 표시 이름 · 색 견본 클래스 · 설명
+const FILTERS = [
+  ['habit', '습관어', 'w-habit', '등록한 습관어 — 눌러서 대체어로 바꾸기'],
+  ['root', '어근반복', 'w-root', '같은 2글자 어근 3회 이상'],
+  ['echo', '근접메아리', 'w-echo', '2회뿐이어도 인접 문장·40자 안에서 다시 나온 어근'],
+  ['vague', '흐린어투', 'v-vague', '추측·회피 / 이중 피동 / 번역투'],
+  ['firstPerson', '1인칭', 'w-first', '나는·내가·제가… 3회 이상'],
+  ['endingLong', '어미·만연체', 'w-rep s-long', '3연속 같은 어미 · 60자 넘는 문장'],
+  ['properSpam', '고유명사', 'w-proper', '같은 고유명사 6회 이상 (도배)'],
+];
+let lastAnalysis = null; // 거울 클릭 시 경고(mark) 정보를 찾기 위해 보관
+
+function renderFilterChips(counts = null) {
+  const f = S.state.settings.mirrorFilters;
+  el.filters.innerHTML = FILTERS.map(([k, label, cls, desc]) => {
+    const n = counts ? counts[k] : 0;
+    return `<button type="button" class="fchip ${f[k] ? 'on' : ''}" data-filter="${k}" aria-pressed="${f[k]}" title="${escapeHTML(desc)}">
+      <span class="sw ${cls}">가</span>${label}${n ? `<b>${n}</b>` : ''}</button>`;
+  }).join('');
+}
+
+function renderIgnoredLine() {
+  const d = cur();
+  const words = d ? d.ignoredWords : [];
+  el.ignoredLine.hidden = !words.length;
+  el.ignoredLine.innerHTML = words.length
+    ? `<span>이 글에서 무시 중:</span> ${words.map((w) => `<button type="button" data-unignore="${escapeHTML(w)}" title="다시 감지하기">${escapeHTML(w)} ✕</button>`).join('')}`
+    : '';
+}
+
 function renderMirror() {
   const d = cur();
   const text = d ? d.body : '';
   el.radar.checked = S.state.settings.radarOn;
+  el.filters.hidden = !S.state.settings.radarOn;
+  renderIgnoredLine();
+  lastAnalysis = null;
   if (!text.trim()) {
+    renderFilterChips();
     el.stats.innerHTML = '';
     el.bars.innerHTML = '';
-    el.mirror.innerHTML = '<span class="placeholder">본문을 쓰면 이곳에 어투 거울이 비칩니다. 하이라이트된 단어를 누르면 본문의 해당 위치로 이동합니다.</span>';
+    el.mirror.innerHTML = '<span class="placeholder">본문을 쓰면 이곳에 어투 거울이 비칩니다. 하이라이트된 단어를 누르면 본문의 해당 위치로 이동하고, 바로 고칠 수 있는 버튼이 뜹니다.</span>';
     return;
   }
   if (!S.state.settings.radarOn) {
@@ -431,19 +508,21 @@ function renderMirror() {
     el.mirror.innerHTML = escapeHTML(text);
     return;
   }
-  const a = analyze(text, S.state.settings.habits);
+  const a = analyze(text, {
+    habits: S.state.settings.habits,
+    properNouns: S.state.settings.properNouns,
+    ignoredWords: d.ignoredWords,
+    filters: S.state.settings.mirrorFilters,
+  });
+  lastAnalysis = a;
   const st = a.stats;
-  const habitTotal = Object.values(st.habitHits).reduce((x, y) => x + y, 0);
+  renderFilterChips(st.counts);
   const chips = [
     `<span class="chip score" title="고유 어절 ÷ 전체 어절">어휘 다양성 <b>${st.diversity}</b>점</span>`,
     `<span class="chip">어절 <b>${st.wordCount}</b></span>`,
     `<span class="chip">문장 <b>${st.sentenceCount}</b></span>`,
-    st.firstPersonCount ? `<span class="chip ${st.firstPersonCount >= 3 ? 'warn' : ''}">1인칭 <b>${st.firstPersonCount}</b></span>` : '',
-    st.longCount ? `<span class="chip warn">만연체 <b>${st.longCount}</b></span>` : '',
-    st.repRuns.length ? `<span class="chip warn">연속 어미 <b>${st.repRuns.length}</b>구간</span>` : '',
-    habitTotal ? `<span class="chip warn">습관어 <b>${habitTotal}</b></span>` : '',
   ];
-  if (st.repeatedRoots.length) {
+  if (st.repeatedRoots.length && S.state.settings.mirrorFilters.root) {
     chips.push(`<div class="roots-line">반복 어근: ${st.repeatedRoots.slice(0, 6).map((r) => `<b>${escapeHTML(r.root)}</b>×${r.count}`).join(' · ')}</div>`);
   }
   el.stats.innerHTML = chips.join('');
@@ -456,35 +535,105 @@ function renderMirror() {
   el.mirror.innerHTML = toHTML(text, a);
 }
 
-// ---------- 습관어 대체어 팝오버 ----------
-function showHabitPopover(span) {
-  const d = cur();
-  const h = S.state.settings.habits[Number(span.dataset.h)];
-  if (!d || !h) return;
-  const hs = Number(span.dataset.hs), he = Number(span.dataset.he);
-  if (d.body.slice(hs, he) !== h.word) return;
-  const alts = h.alternatives.length ? h.alternatives : [''];
-  el.popover.innerHTML = `<div class="pop-title">“${escapeHTML(h.word)}” 대신${d.sealed ? ' (봉인됨)' : ''}</div>` +
-    alts.map((alt, i) => `<button data-alt="${i}" class="${alt ? '' : 'del'}" ${d.sealed ? 'disabled' : ''}>${alt ? escapeHTML(alt) : '(삭제)'}</button>`).join('');
-  el.popover.dataset.hs = hs;
-  el.popover.dataset.he = he;
-  el.popover.dataset.h = span.dataset.h;
+// ---------- 원클릭 액션 팝오버 ----------
+let popMark = null; // 팝오버가 가리키는 경고
+function placePopover(anchor) {
   el.popover.hidden = false;
-  const r = span.getBoundingClientRect();
+  const r = anchor.getBoundingClientRect();
   const pw = el.popover.offsetWidth, ph = el.popover.offsetHeight;
-  let left = Math.min(Math.max(8, r.left), innerWidth - pw - 8);
+  const left = Math.min(Math.max(8, r.left), innerWidth - pw - 8);
   let top = r.bottom + 6;
   if (top + ph > innerHeight - 8) top = Math.max(8, r.top - ph - 6);
   el.popover.style.left = left + 'px';
   el.popover.style.top = top + 'px';
 }
-function closePopover() { el.popover.hidden = true; }
+/** 경고 종류에 맞는 버튼 구성 */
+function showMarkPopover(mark, anchor) {
+  const d = cur();
+  if (!d) return;
+  popMark = mark;
+  const sealedNote = d.sealed ? ' (봉인됨)' : '';
+  let html = '';
+  if (mark.kind === 'habit') {
+    const h = S.state.settings.habits[mark.habitIndex];
+    if (!h) return;
+    const alts = h.alternatives.length ? h.alternatives : [''];
+    html = `<div class="pop-title">“${escapeHTML(h.word)}” 대신${sealedNote}</div>` +
+      alts.map((alt, i) => `<button data-alt="${i}" class="${alt ? '' : 'del'}" ${d.sealed ? 'disabled' : ''}>${alt ? escapeHTML(alt) : '(삭제)'}</button>`).join('');
+  } else if (mark.kind === 'root' || mark.kind === 'echo' || mark.kind === 'proper') {
+    const properWord = mark.word;                                 // 영구 면제: 조사를 뗀 원형
+    const ignoreWord = mark.kind === 'proper' ? mark.word : mark.root; // 이 글 무시: 어근 묶음 전체
+    const isProper = S.state.settings.properNouns.includes(properWord);
+    html = `<div class="pop-title">${escapeHTML(mark.tip || '')}</div>` +
+      (mark.kind === 'proper'
+        ? `<div class="pop-hint">같은 이름이 너무 자주 나와요. 주어를 생략하거나 ‘그/그녀/팀장님’ 같은 대명사로 바꿔 보세요.</div>`
+        : `<button data-act="proper" ${isProper ? 'disabled' : ''}>🏷 고유명사 영구 면제 · “${escapeHTML(properWord)}”</button>`) +
+      `<button data-act="ignore" ${d.sealed ? 'disabled' : ''}>✕ 이 글에서만 무시 · “${escapeHTML(ignoreWord)}”${sealedNote}</button>`;
+  } else {
+    html = `<div class="pop-title">${escapeHTML(mark.tip || '')}</div>`;
+  }
+  el.popover.innerHTML = html;
+  placePopover(anchor);
+}
+function closePopover() { el.popover.hidden = true; popMark = null; }
+
+/** 고유명사 영구 면제 (설정 — 모든 일기에 적용) */
+function exemptProper(word) {
+  word = (word || '').trim();
+  if (!word) return;
+  const list = S.state.settings.properNouns;
+  if (!list.includes(word)) list.push(word);
+  S.saveSettings();
+  closePopover();
+  renderMirror();
+  toast(`🏷 “${word}”을(를) 고유명사로 면제했습니다 (⚙ 설정에서 해제)`);
+}
+/** 이 글에서만 무시 (일기에 저장) */
+function ignoreHere(word) {
+  const d = cur();
+  word = (word || '').trim();
+  if (!d || d.sealed || !word) return;
+  if (!d.ignoredWords.includes(word)) d.ignoredWords.push(word);
+  S.saveNow(d);
+  closePopover();
+  renderMirror();
+  toast(`✕ 이 글에서 “${word}” 반복 감지를 껐습니다`);
+}
+function unignoreHere(word) {
+  const d = cur();
+  if (!d || d.sealed) return;
+  d.ignoredWords = d.ignoredWords.filter((w) => w !== word);
+  S.saveNow(d);
+  renderMirror();
+  if (!$('#settingsModal').hidden) renderExceptionChips();
+  toast(`“${word}” 다시 감지합니다`, 1400);
+}
+function unexemptProper(word) {
+  S.state.settings.properNouns = S.state.settings.properNouns.filter((w) => w !== word);
+  S.saveSettings();
+  renderExceptionChips();
+  renderMirror();
+  toast(`“${word}” 고유명사 면제를 해제했습니다`, 1400);
+}
+function renderExceptionChips() {
+  const pn = S.state.settings.properNouns;
+  $('#properChips').innerHTML = pn.length
+    ? pn.map((w) => `<button type="button" data-unproper="${escapeHTML(w)}" title="면제 해제">${escapeHTML(w)} ✕</button>`).join('')
+    : '<span class="muted small">아직 없어요 — 거울에서 단어를 눌러 [고유명사 영구 면제]로 추가할 수 있어요.</span>';
+  const d = cur();
+  const ig = d ? d.ignoredWords : [];
+  $('#ignoredChips').innerHTML = ig.length
+    ? ig.map((w) => `<button type="button" data-unignore="${escapeHTML(w)}" title="다시 감지">${escapeHTML(w)} ✕</button>`).join('')
+    : '<span class="muted small">이 일기에서 무시한 단어가 없어요.</span>';
+}
+
 function applyAlternative(i) {
   const d = cur();
-  const h = S.state.settings.habits[Number(el.popover.dataset.h)];
+  const mark = popMark;
+  const h = mark && S.state.settings.habits[mark.habitIndex];
   if (!d || !h || d.sealed) return;
-  const hs = Number(el.popover.dataset.hs);
-  let he = Number(el.popover.dataset.he);
+  const hs = mark.s;
+  let he = mark.e;
   if (d.body.slice(hs, he) !== h.word) { closePopover(); return; }
   const alt = h.alternatives[i] ?? '';
   const ta = FIELDS.body;
@@ -762,6 +911,7 @@ function renderGdStatus(msg = '') {
 }
 function openSettings() {
   renderAppInfo();
+  renderExceptionChips();
   renderGdStatus();
   GD.prepare(); // [연결] 버튼을 누르기 전에 구글 로그인 도구를 미리 불러둠 (팝업 차단 방지)
   $('#habitsText').value = habitsToText(S.state.settings.habits);
@@ -909,27 +1059,79 @@ function bind() {
     toast(quickTodo ? '☑ 할 일(체크박스)로 던집니다' : '⚡ 시각 메모로 던집니다', 1400);
   });
 
-  // 어투 거울 클릭 → 본문 역추적
+  // 어투 거울 클릭 → 1) 본문 역추적(드래그 선택) 2) 액션 팝오버
   el.mirror.addEventListener('click', (e) => {
-    const span = e.target.closest('span[data-s]');
-    if (!span) return;
-    const d = cur();
-    if (!d) return;
-    if (span.dataset.h !== undefined) {
-      selectInField('body', Number(span.dataset.hs), Number(span.dataset.he));
-      showHabitPopover(span);
-    } else {
-      closePopover();
-      selectInField('body', Number(span.dataset.s), Number(span.dataset.e));
-    }
+    const span = e.target.closest('span[data-m]');
+    if (!span || !lastAnalysis || !cur()) return;
+    const ids = span.dataset.m.split(',').map(Number);
+    const marks = ids.map((i) => lastAnalysis.marks[i]).filter(Boolean).sort((x, y) => x.prio - y.prio);
+    const mark = marks[0];
+    if (!mark) return;
+    selectInField('body', mark.s, mark.e);
+    showMarkPopover(mark, span);
   });
   el.popover.addEventListener('mousedown', (e) => e.preventDefault());
   el.popover.addEventListener('click', (e) => {
-    const b = e.target.closest('button[data-alt]');
-    if (b) applyAlternative(Number(b.dataset.alt));
+    const alt = e.target.closest('button[data-alt]');
+    if (alt) { applyAlternative(Number(alt.dataset.alt)); return; }
+    const act = e.target.closest('button[data-act]');
+    if (!act || !popMark) return;
+    if (act.dataset.act === 'proper') exemptProper(popMark.word);
+    if (act.dataset.act === 'ignore') ignoreHere(popMark.kind === 'proper' ? popMark.word : popMark.root);
   });
   document.addEventListener('mousedown', (e) => {
-    if (!el.popover.hidden && !el.popover.contains(e.target) && !e.target.closest('.mirror span[data-h]')) closePopover();
+    if (!el.popover.hidden && !el.popover.contains(e.target) && !e.target.closest('.mirror span[data-m]')) closePopover();
+  });
+  // 필터 칩: 항목별 ON/OFF (설정에 저장 → 동기화)
+  el.filters.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-filter]');
+    if (!b) return;
+    const f = S.state.settings.mirrorFilters;
+    f[b.dataset.filter] = !f[b.dataset.filter];
+    S.saveSettings();
+    closePopover();
+    renderMirror();
+  });
+  // 무시 단어 복구 (거울 아래 줄 · 설정)
+  document.addEventListener('click', (e) => {
+    const un = e.target.closest('button[data-unignore]');
+    if (un) { unignoreHere(un.dataset.unignore); return; }
+    const up = e.target.closest('button[data-unproper]');
+    if (up) unexemptProper(up.dataset.unproper);
+  });
+  $('#properAddForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const words = $('#properAdd').value.split(',').map((w) => w.trim()).filter(Boolean);
+    if (!words.length) return;
+    words.forEach((w) => { if (!S.state.settings.properNouns.includes(w)) S.state.settings.properNouns.push(w); });
+    S.saveSettings();
+    $('#properAdd').value = '';
+    renderExceptionChips();
+    renderMirror();
+    toast(`🏷 고유명사 ${words.length}개를 면제 목록에 추가했습니다`);
+  });
+
+  // 작품 후기 템플릿
+  $('#btnReview').addEventListener('click', startReview);
+  $('#rvStars').addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-star]');
+    const d = cur();
+    if (!b || !d || d.sealed) return;
+    const n = Number(b.dataset.star);
+    const cur0 = (d.body.match(/^■\s*별점:\s*(★*)/m) || [, ''])[1].length;
+    const ta = FIELDS.body;
+    ta.value = setStars(d.body, cur0 === n ? n - 1 : n); // 같은 별 다시 누르면 하나 줄이기
+    onFieldInput('body');
+  });
+  $('#btnRvHighlight').addEventListener('click', () => {
+    const d = cur();
+    if (!d || d.sealed) return;
+    const line = oneLiner(d.body);
+    if (!line) { toast('■ 한 줄 평: 뒤에 먼저 한 줄을 적어 주세요'); return; }
+    d.highlightSentence = line;
+    el.hl.value = line;
+    S.saveNow(d); onSaved();
+    toast('⭐ 한 줄 평을 대표 문장으로 지정했습니다');
   });
   el.radar.addEventListener('change', () => {
     S.state.settings.radarOn = el.radar.checked;

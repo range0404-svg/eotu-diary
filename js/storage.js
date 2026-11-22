@@ -19,12 +19,23 @@ export const DEFAULT_HABITS = [
   { word: '좀', alternatives: ['조금', '다소', ''] },
 ];
 
+/** 어투 거울 7개 항목 ON/OFF (기본 모두 켬) */
+export const MIRROR_FILTER_KEYS = ['habit', 'root', 'echo', 'vague', 'firstPerson', 'endingLong', 'properSpam'];
+const defaultFilters = () => Object.fromEntries(MIRROR_FILTER_KEYS.map((k) => [k, true]));
+
 const defaultSettings = () => ({
   habits: JSON.parse(JSON.stringify(DEFAULT_HABITS)),
   theme: 'paper',
   radarOn: true,
+  properNouns: [],              // 영구 고유명사 면제 목록 (어근 반복·근접 메아리 제외)
+  mirrorFilters: defaultFilters(),
   updatedAt: 0,
 });
+
+/** 문자열 배열 정리: 공백 제거 · 빈 값 제거 · 중복 제거 */
+const cleanWords = (arr) => (Array.isArray(arr)
+  ? [...new Set(arr.map((w) => String(w ?? '').trim()).filter(Boolean))]
+  : []);
 
 export const state = { diaries: [], settings: defaultSettings() };
 
@@ -55,6 +66,7 @@ export function normalizeDiary(d = {}) {
     sealed: !!d.sealed,
     sealedAt: String(d.sealedAt ?? ''),
     highlightSentence: String(d.highlightSentence ?? ''),
+    ignoredWords: cleanWords(d.ignoredWords), // 이 일기에서만 반복 감지를 무시할 원형 단어
     updatedAt: Number(d.updatedAt) || Date.now(),
     ...(d.deleted ? { deleted: true } : {}),
   };
@@ -67,20 +79,31 @@ function normalizeSettings(s = {}) {
     })) : base.habits,
     theme: ['paper', 'sepia', 'dark'].includes(s.theme) ? s.theme : base.theme,
     radarOn: s.radarOn !== undefined ? !!s.radarOn : base.radarOn,
+    properNouns: cleanWords(s.properNouns),
+    mirrorFilters: Object.fromEntries(MIRROR_FILTER_KEYS.map((k) => [
+      k, s.mirrorFilters && typeof s.mirrorFilters[k] === 'boolean' ? s.mirrorFilters[k] : true,
+    ])),
     updatedAt: Number(s.updatedAt) || 0,
   };
 }
 
 // ---------- 로컬 저장 ----------
 // ⚠ 업데이트 규칙: LS_DATA 키 이름은 절대 바꾸지 말 것. 구조가 바뀌면 DATA_VERSION을 올리고 migrate()에 변환을 추가.
-const DATA_VERSION = 1;
+const DATA_VERSION = 2; // v2: diaries[].ignoredWords, settings.properNouns, settings.mirrorFilters 추가
 const LS_BACKUP_PREFIX = 'eotu.v2.backup.';
 const BACKUP_KEEP = 3;
 
 /** 저장 데이터 구조 변환 (이전 버전 → 현재 버전). 데이터를 지우지 말고 변환만 할 것 */
 function migrate(data) {
-  // let v = data.v || 1;
-  // if (v < 2) { ...v1 → v2 변환...; v = 2; }
+  const v = Number(data.v) || 1;
+  if (v < 2) {
+    // v1 → v2: 새 필드에 기본값만 채움 (기존 일기 내용은 그대로)
+    (data.diaries || []).forEach((d) => { if (d && !Array.isArray(d.ignoredWords)) d.ignoredWords = []; });
+    if (data.settings) {
+      if (!Array.isArray(data.settings.properNouns)) data.settings.properNouns = [];
+      if (!data.settings.mirrorFilters) data.settings.mirrorFilters = defaultFilters();
+    }
+  }
   data.v = DATA_VERSION;
   return data;
 }
@@ -162,13 +185,13 @@ export function getDiary(id) { return state.diaries.find((d) => d.id === id && !
 
 const OPEN_TODO = /^\s*(?:[-*]\s*)?\[ \]/;
 
-/** 새 일기 생성 + 직전 일기의 미완료 복선 자동 이월 */
-export function createDiary(date = todayStr()) {
-  const prev = liveDiaries()
+/** 새 일기 생성 + 직전 일기의 미완료 복선 자동 이월 (carry:false면 이월 없음, body로 본문 템플릿 지정) */
+export function createDiary(date = todayStr(), { carry = true, body = '' } = {}) {
+  const prev = carry ? liveDiaries()
     .filter((d) => d.date < date)
-    .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt)[0];
+    .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt)[0] : null;
   const carried = prev ? prev.foreshadow.split('\n').filter((l) => OPEN_TODO.test(l)) : [];
-  const d = normalizeDiary({ id: uid(), date, foreshadow: carried.join('\n') });
+  const d = normalizeDiary({ id: uid(), date, foreshadow: carried.join('\n'), body });
   saveDiary(d);
   baseline.set(d.id, clone(d));
   return { diary: d, carried: carried.length, from: prev ? prev.date : null };
